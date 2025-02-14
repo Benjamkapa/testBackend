@@ -3,7 +3,7 @@ const express = require("express");
 const cors = require("cors");
 
 const app = express();
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || 9823;
 
 // Allow cross-origin requests
 app.use(cors());
@@ -68,5 +68,5 @@ app.post("/payments", (req, res) => {
 
 // Start the server
 app.listen(port, () => {
-  console.log(`Server's up n running on http://localhost:${port}`);
+  console.log(`Server's running on http://localhost:${port} 🤓🥵`);
 });
