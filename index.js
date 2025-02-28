@@ -1,72 +1,81 @@
-// index.js
-const express = require("express");
-const cors = require("cors");
+const express = require('express');
+const mysql = require('mysql2');
+const cors = require('cors');
+const bodyParser = require('body-parser');
 
 const app = express();
-const port = process.env.PORT || 9823;
-
-// Allow cross-origin requests
 app.use(cors());
-// Parse JSON bodies
-app.use(express.json());
+app.use(bodyParser.json());
 
-// In-memory storage for payments and connected SSE clients
-let payments = [];
+const PORT = 9823;
+
+// MySQL Connection
+const db = mysql.createConnection({
+  host: 'localhost',
+  user: 'root',   // Change to your DB user
+  password: '',   // Change to your DB password
+  database: 'test' // Change to your DB name
+});
+
+db.connect(err => {
+  if (err) throw err;
+  console.log('MySQL Connected...🤓🥵');
+});
+
+// SSE Clients
 let clients = [];
 
-// Helper function: Broadcast payment to all SSE clients
-const broadcastPayment = (payment) => {
-  clients.forEach((client) => {
-    client.res.write(`data: ${JSON.stringify(payment)}\n\n`);
-  });
+// SSE: Send updates to connected clients
+const sendEvent = (data) => {
+  clients.forEach(client => client.res.write(`data: ${JSON.stringify(data)}\n\n`));
 };
 
-// SSE Endpoint for notifications
-app.get("/notifications", (req, res) => {
-  // Set SSE headers
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.flushHeaders();
+// Endpoint for Server-Sent Events
+app.get('/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
 
-  // // Optionally send an initial event
-  // res.write(`data: ${JSON.stringify({ message: "Connected to notifications stream" })}\n\n`);
+  clients.push({ res });
 
-  // Save the client connection for later broadcasts
-  const clientId = Date.now();
-  const newClient = { id: clientId, res };
-  clients.push(newClient);
-  console.log(`Client ${clientId} connected. Total clients: ${clients.length}`);
-
-  // Remove client when connection is closed
-  req.on("close", () => {
-    console.log(`Client ${clientId} disconnected.`);
-    clients = clients.filter(client => client.id !== clientId);
+  req.on('close', () => {
+    clients = clients.filter(client => client.res !== res);
   });
 });
 
-// Endpoint to retrieve all payments (optional)
-app.get("/payments", (req, res) => {
-  res.json(payments);
+// Store Payment in Database
+app.post('/payments', (req, res) => {
+  const { reg_no, phone, amount, paymentMethod } = req.body;
+
+  const sql = `INSERT INTO payments (reg_no, phone, amount, payment_method) VALUES (?, ?, ?, ?)`;
+  db.query(sql, [reg_no, phone, amount, paymentMethod], (err, result) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    const newPayment = { id: result.insertId, reg_no, phone, amount, paymentMethod, status: 'pending' };
+    
+    // Notify clients via SSE
+    sendEvent(newPayment);
+    
+    res.status(201).json({ success: true, message: 'Payment recorded', payment: newPayment });
+  });
 });
 
-// POST endpoint to add a new payment
-app.post("/payments", (req, res) => {
-  const payment = req.body;
-  // Create a unique id and record the timestamp
-  payment.id = Date.now();
-  payment.timestamp = new Date().toISOString();
-  payments.push(payment);
-
-  // Broadcast the new payment via SSE
-  broadcastPayment(payment);
-  console.log("Broadcasting new payment:", payment);
-
-  // Respond with the created payment
-  res.status(201).json(payment);
+// Broadcasts data from the database
+app.get('/payments', (req, res) => {
+  const sql = 'SELECT * FROM payments';
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+    res.json(results);
+  });
 });
 
-// Start the server
-app.listen(port, () => {
-  console.log(`Server's running on http://localhost:${port} 🤓🥵`);
+// Start Server
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
